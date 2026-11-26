@@ -46,9 +46,10 @@ export async function startTwoStepAction(_prev: FormState, form: FormData): Prom
   await requireStaff(undefined, { allowTwoFactorSetup: true });
   const password = String(form.get("password") ?? "");
   try {
-    const { totpURI, backupCodes } = await staffAuth.api.enableTwoFactor({ body: { password }, headers: await headers() });
-    const qr = await QRCode.toDataURL(totpURI, { margin: 1, width: 220 });
-    return { qr, backupCodes, step: "confirm" };
+    const result = await staffAuth.api.enableTwoFactor({ body: { password }, headers: await headers() });
+    if (result.method !== "totp") return { error: "Authenticator-app setup is not available." };
+    const qr = await QRCode.toDataURL(result.totpURI, { margin: 1, width: 220 });
+    return { qr, backupCodes: result.backupCodes, step: "confirm" };
   } catch {
     return { error: "Password not accepted." };
   }
