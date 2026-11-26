@@ -13,10 +13,13 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db execute --file prisma/seed.sql",
+    "staff:create": "tsx scripts/create-staff.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -28,6 +31,7 @@
     "next": "16.4.6",
     "pg": "^8.16.3",
     "pg-boss": "12.39.0",
+    "qrcode": "^1.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "sharp": "0.35.5",
@@ -37,12 +41,14 @@
     "@tailwindcss/postcss": "4.3.5",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.15.5",
+    "@types/qrcode": "^1.5.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "eslint": "^9.36.0",
     "eslint-config-next": "16.4.6",
     "prisma": "7.10.1",
     "tailwindcss": "4.3.5",
+    "tsx": "^4.20.6",
     "typescript": "~5.9.3",
     "vitest": "5.1.1"
   }

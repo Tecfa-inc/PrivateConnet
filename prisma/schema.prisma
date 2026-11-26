@@ -254,8 +254,8 @@ enum StaffRole {
   MODERATOR
 }
 
-/// Staff accounts. Field names follow Better Auth's user model; the auth tables below
-/// are reconciled with Better Auth's generated schema in milestone M2.
+/// Staff accounts. Field names follow Better Auth's core schema (user, session, account,
+/// verification) and its two-factor plugin, mapped to these models in src/lib/auth/staff-auth.ts.
 model Staff {
   id               String    @id @default(cuid())
   name             String
@@ -289,8 +289,8 @@ model Staff {
 
 model StaffSession {
   id        String   @id
-  staffId   String
-  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  userId    String
+  staff     Staff    @relation(fields: [userId], references: [id], onDelete: Cascade)
   token     String   @unique
   expiresAt DateTime
   ipAddress String?
@@ -303,8 +303,8 @@ model StaffSession {
 
 model StaffAccount {
   id                    String    @id
-  staffId               String
-  staff                 Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  userId                String
+  staff                 Staff     @relation(fields: [userId], references: [id], onDelete: Cascade)
   accountId             String
   providerId            String
   password              String? // slow hash managed by Better Auth
@@ -333,8 +333,8 @@ model StaffVerification {
 
 model StaffTwoFactor {
   id          String @id
-  staffId     String
-  staff       Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  userId      String
+  staff       Staff  @relation(fields: [userId], references: [id], onDelete: Cascade)
   secret      String
   backupCodes String
 

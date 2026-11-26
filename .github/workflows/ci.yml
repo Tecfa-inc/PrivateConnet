@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write # temporary: posts the schema SQL for the first migration
 
 jobs:
   check:
@@ -44,13 +45,28 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Validate database schema
         run: npx prisma validate
-      - name: Apply schema to a fresh database
-        run: npx prisma db push --accept-data-loss
+      - name: Export full schema SQL (used to create and check migrations)
+        run: npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script > schema-from-empty.sql
+      - name: Post schema SQL to the pull request (temporary, until the first migration exists)
+        if: github.event_name == 'pull_request' && hashFiles('prisma/migrations/migration_lock.toml') == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '<!-- schema-sql -->'; echo '```sql'; cat schema-from-empty.sql; echo '```'; } > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file comment.md
+      - name: Apply migrations to a fresh database
+        run: npx prisma migrate deploy
+      - name: Check migrations match the schema (no drift)
+        run: npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+      - name: Seed countries and cities
+        run: npm run db:seed
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
         run: npm run lint
       - name: Unit tests
         run: npm test
+      - name: Integration tests (real PostgreSQL)
+        run: npm run test:integration
       - name: Build
         run: npm run build
