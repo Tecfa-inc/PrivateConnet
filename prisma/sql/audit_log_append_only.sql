@@ -1,5 +1,5 @@
 -- ADM-15: the audit log can be written but never changed or deleted.
--- Add this to the first migration (`npx prisma migrate dev --create-only`, then append).
+-- Included in prisma/migrations/20261126120000_init. Keep this copy for reference.
 
 CREATE OR REPLACE FUNCTION audit_log_reject_change() RETURNS trigger AS $$
 BEGIN
@@ -16,5 +16,11 @@ CREATE TRIGGER audit_log_no_truncate
   FOR EACH STATEMENT EXECUTE FUNCTION audit_log_reject_change();
 
 -- The app's database user may only insert and read audit rows.
--- (Run as the migration user; the role name matches .env.example.)
-REVOKE UPDATE, DELETE, TRUNCATE ON "AuditLog" FROM privateconnet_app;
+-- (Run as the migration user; the role name matches .env.example. Skipped where the role doesn't exist, e.g. in CI.)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'privateconnet_app') THEN
+    REVOKE UPDATE, DELETE, TRUNCATE ON "AuditLog" FROM privateconnet_app;
+  END IF;
+END
+$$;
