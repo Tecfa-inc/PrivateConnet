@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write # temporary: posts the schema SQL for the first migration
 
 jobs:
   check:
@@ -46,12 +47,13 @@ jobs:
         run: npx prisma validate
       - name: Export full schema SQL (used to create and check migrations)
         run: npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script > schema-from-empty.sql
-      - name: Upload schema SQL
-        uses: actions/upload-artifact@v4
-        with:
-          name: schema-sql
-          path: schema-from-empty.sql
-          retention-days: 7
+      - name: Post schema SQL to the pull request (temporary, until the first migration exists)
+        if: github.event_name == 'pull_request' && hashFiles('prisma/migrations/migration_lock.toml') == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '<!-- schema-sql -->'; echo '```sql'; cat schema-from-empty.sql; echo '```'; } > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file comment.md
       - name: Apply schema to a fresh database
         run: npx prisma db push --accept-data-loss
       - name: Typecheck
