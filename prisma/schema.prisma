@@ -1,0 +1,571 @@
+// PrivateConnet database schema — Stage 04 data model (23 tables + pg-boss's own).
+// Requirement IDs refer to the approved PRD.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────── Places ─────────────────────────
+
+model Country {
+  id         String  @id @default(cuid())
+  isoCode    String  @unique @db.Char(2) // "LR"
+  name       String
+  phoneCode  String // "+231"
+  active     Boolean @default(false) // NFR-14: only Liberia active at launch
+  legalNotes String?
+  cities     City[]
+}
+
+model City {
+  id        String   @id @default(cuid())
+  countryId String
+  country   Country  @relation(fields: [countryId], references: [id])
+  name      String
+  area      String? // e.g. "Sinkor"
+  timeZone  String   @default("Africa/Monrovia")
+  active    Boolean  @default(true)
+  members   Member[]
+
+  @@unique([countryId, name, area])
+}
+
+// ───────────────────────── Members ─────────────────────────
+
+enum MemberStatus {
+  AWAITING_CONFIRMATION
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum LookingFor {
+  RELATIONSHIP
+  FRIENDSHIP
+  EITHER
+}
+
+enum Gender {
+  WOMAN
+  MAN
+  OTHER
+}
+
+/// Public side of a member. Never holds legal name, DOB or phone (CLAUDE.md rule 7).
+model Member {
+  id               String       @id @default(cuid())
+  memberNumber     Int          @unique @default(autoincrement())
+  status           MemberStatus @default(AWAITING_CONFIRMATION)
+  displayName      String       @db.VarChar(40)
+  ageYears         Int // derived from DOB at creation and yearly; DOB itself stays in MemberPrivate
+  cityId           String
+  city             City         @relation(fields: [cityId], references: [id])
+  lookingFor       LookingFor
+  gender           Gender?
+  occupation       String?      @db.VarChar(60)
+  bio              String       @db.VarChar(500)
+  interests        String[] // max 8, from a fixed list (PRO-01)
+  showGender       Boolean      @default(true) // PRO-02 visibility switches
+  showOccupation   Boolean      @default(true)
+  verified         Boolean      @default(false) // PRO-05 live selfie match
+  callsPaused      Boolean      @default(false) // CAL-04
+  confirmedAt      DateTime? // ONB-07: profile goes live only after the owner confirms
+  createdById      String
+  createdBy        Staff        @relation("MemberCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  private          MemberPrivate?
+  photos           Photo[]
+  revisions        ProfileRevision[]
+  consents         Consent[]
+  availability     Availability[]
+  signInLinks      SignInLink[]
+  devices          MemberDevice[]
+  pushSubs         PushSubscription[]
+  sentRequests     Connection[]       @relation("ConnectionRequester")
+  receivedRequests Connection[]       @relation("ConnectionRecipient")
+  revealsMade      NumberReveal[]     @relation("RevealViewer")
+  revealsOfMe      NumberReveal[]     @relation("RevealSubject")
+  blocksMade       Block[]            @relation("Blocker")
+  blocksReceived   Block[]            @relation("Blocked")
+  meetingsA        Meeting[]          @relation("MeetingMemberA")
+  meetingsB        Meeting[]          @relation("MeetingMemberB")
+  proposals        MeetingProposal[]
+  notifications    Notification[]
+  reportsMade      Report[]           @relation("Reporter")
+  reportsAgainst   Report[]           @relation("Reported")
+  moderation       ModerationAction[]
+  dataRequests     DataRequest[]
+
+  @@index([status, cityId])
+}
+
+/// Staff-only private details. Every text column holds AES-256-GCM ciphertext
+/// (src/lib/crypto/field-encryption.ts). phoneHash is an HMAC blind index so the
+/// phone stays unique and searchable without being stored in clear.
+model MemberPrivate {
+  memberId             String    @id
+  member               Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  legalNameEnc         String
+  dateOfBirthEnc       String
+  phoneEnc             String
+  phoneHash            String    @unique // ONB edge case: no duplicate numbers
+  backupContactEnc     String? // ONB-14
+  phoneVerifiedAt      DateTime // ONB-04
+  phoneVerifiedById    String
+  phoneVerifiedBy      Staff     @relation("PhoneVerifiedBy", fields: [phoneVerifiedById], references: [id])
+  updatedAt            DateTime  @updatedAt
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// A member-proposed change to public fields; the live Member row changes only on approval (PRO-03).
+model ProfileRevision {
+  id           String       @id @default(cuid())
+  memberId     String
+  member       Member       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  changes      Json // only whitelisted public fields
+  flags        String[] // e.g. "PHONE_NUMBER", "PRICE" (PRO-06)
+  status       ReviewStatus @default(PENDING)
+  reviewedById String?
+  reviewedBy   Staff?       @relation("RevisionReviewedBy", fields: [reviewedById], references: [id])
+  reviewReason String?
+  createdAt    DateTime     @default(now())
+  reviewedAt   DateTime?
+
+  @@index([status, createdAt])
+}
+
+model Photo {
+  id           String       @id @default(cuid())
+  memberId     String
+  member       Member       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  storageKey   String       @unique // folder under MEDIA_ROOT; sizes: list, profile, review
+  position     Int // 0–5 (max 6 photos)
+  status       ReviewStatus @default(PENDING)
+  reviewedById String?
+  reviewedBy   Staff?       @relation("PhotoReviewedBy", fields: [reviewedById], references: [id])
+  createdAt    DateTime     @default(now())
+
+  @@index([memberId, status])
+}
+
+enum ConsentPurpose {
+  LISTED_FOR_MEMBERS
+  PHOTO_USE
+  NUMBER_SHARING
+  TERMS_AND_PRIVACY // includes hosting outside Liberia (ONB-07)
+  EMAIL_NOTIFICATIONS
+  PUSH_NOTIFICATIONS
+}
+
+/// Append-only consent history (PRV-03). Withdrawal is a new row with given = false.
+model Consent {
+  id             String         @id @default(cuid())
+  memberId       String
+  member         Member         @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  purpose        ConsentPurpose
+  given          Boolean
+  version        String // version of the wording shown
+  recordedById   String? // staff who recorded it at onboarding; null when given by the member
+  recordedBy     Staff?         @relation("ConsentRecordedBy", fields: [recordedById], references: [id])
+  createdAt      DateTime       @default(now())
+
+  @@index([memberId, purpose, createdAt])
+}
+
+/// Calling hours (CAL-04). Minutes from midnight in the member's city time zone; end may be < start (spans midnight).
+model Availability {
+  id          String @id @default(cuid())
+  memberId    String
+  member      Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  weekday     Int // 0 = Sunday … 6 = Saturday
+  startMinute Int
+  endMinute   Int
+
+  @@index([memberId, weekday])
+}
+
+// ───────────────────────── Access ─────────────────────────
+
+enum LinkPurpose {
+  FIRST_SIGN_IN
+  NEW_DEVICE
+}
+
+/// Single-use sign-in link (ONB-05). Only a SHA-256 hash of the token is stored.
+model SignInLink {
+  id         String      @id @default(cuid())
+  memberId   String
+  member     Member      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  tokenHash  String      @unique
+  purpose    LinkPurpose
+  issuedById String
+  issuedBy   Staff       @relation("LinkIssuedBy", fields: [issuedById], references: [id])
+  expiresAt  DateTime
+  usedAt     DateTime?
+  revokedAt  DateTime?
+  failedTries Int        @default(0) // ONB-12
+  lockedUntil DateTime?
+  createdAt  DateTime    @default(now())
+}
+
+/// A member's signed-in phone or browser (ONB-08, ONB-10, ONB-11). Session token stored as a hash.
+model MemberDevice {
+  id               String    @id @default(cuid())
+  memberId         String
+  member           Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  sessionHash      String    @unique
+  pinHash          String?
+  pinFailedTries   Int       @default(0)
+  pinLockedUntil   DateTime?
+  userAgent        String?
+  lastSeenAt       DateTime  @default(now())
+  expiresAt        DateTime // lastSeenAt + 90 days, rolled forward on each visit
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([memberId])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  memberId  String
+  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+}
+
+enum StaffRole {
+  SUPER_ADMIN
+  ADMIN
+  MODERATOR
+}
+
+/// Staff accounts. Field names follow Better Auth's user model; the auth tables below
+/// are reconciled with Better Auth's generated schema in milestone M2.
+model Staff {
+  id               String    @id @default(cuid())
+  name             String
+  email            String    @unique
+  emailVerified    Boolean   @default(false)
+  image            String?
+  role             StaffRole
+  twoFactorEnabled Boolean   @default(false)
+  disabledAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  sessions         StaffSession[]
+  accounts         StaffAccount[]
+  twoFactors       StaffTwoFactor[]
+
+  membersCreated   Member[]           @relation("MemberCreatedBy")
+  phonesVerified   MemberPrivate[]    @relation("PhoneVerifiedBy")
+  revisionsReviewed ProfileRevision[] @relation("RevisionReviewedBy")
+  photosReviewed   Photo[]            @relation("PhotoReviewedBy")
+  consentsRecorded Consent[]          @relation("ConsentRecordedBy")
+  linksIssued      SignInLink[]       @relation("LinkIssuedBy")
+  reportsAssigned  Report[]           @relation("ReportAssignee")
+  actionsTaken     ModerationAction[]
+  dataRequestsDone DataRequest[]
+  settingsChanged  Setting[]
+  auditEntries     AuditLog[]
+
+  @@map("staff")
+}
+
+model StaffSession {
+  id        String   @id
+  staffId   String
+  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("staff_session")
+}
+
+model StaffAccount {
+  id                    String    @id
+  staffId               String
+  staff                 Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  accountId             String
+  providerId            String
+  password              String? // slow hash managed by Better Auth
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("staff_account")
+}
+
+model StaffVerification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("staff_verification")
+}
+
+model StaffTwoFactor {
+  id          String @id
+  staffId     String
+  staff       Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  secret      String
+  backupCodes String
+
+  @@map("staff_two_factor")
+}
+
+// ───────────────────────── Connecting ─────────────────────────
+
+enum ConnectionStatus {
+  PENDING
+  CONNECTED
+  WITHDRAWN
+  NO_RESPONSE // declined or 14 days without answer; the sender sees the same (CON-02)
+  ENDED
+}
+
+model Connection {
+  id          String           @id @default(cuid())
+  requesterId String
+  requester   Member           @relation("ConnectionRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipientId String
+  recipient   Member           @relation("ConnectionRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  note        String?          @db.VarChar(200)
+  status      ConnectionStatus @default(PENDING)
+  declinedAt  DateTime? // private: never shown to the requester
+  respondedAt DateTime?
+  endedAt     DateTime?
+  endedById   String?
+  createdAt   DateTime         @default(now())
+
+  reveals     NumberReveal[]
+
+  @@index([recipientId, status])
+  @@index([requesterId, status])
+  @@index([requesterId, recipientId, createdAt]) // CON-05 cool-off lookups
+}
+
+/// Written on every number reveal (CAL-05). The app never records whether a call happened.
+model NumberReveal {
+  id           String     @id @default(cuid())
+  connectionId String
+  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  viewerId     String
+  viewer       Member     @relation("RevealViewer", fields: [viewerId], references: [id], onDelete: Cascade)
+  subjectId    String
+  subject      Member     @relation("RevealSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@index([viewerId, createdAt]) // daily reveal limit
+}
+
+model Block {
+  blockerId String
+  blocker   Member   @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   Member   @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+enum MeetingStatus {
+  REQUESTED
+  COUNTER_PROPOSED
+  CONFIRMED
+  DECLINED
+  CANCELLED
+  EXPIRED
+  PAST
+}
+
+model Meeting {
+  id           String            @id @default(cuid())
+  memberAId    String // the member who first proposed
+  memberA      Member            @relation("MeetingMemberA", fields: [memberAId], references: [id], onDelete: Cascade)
+  memberBId    String
+  memberB      Member            @relation("MeetingMemberB", fields: [memberBId], references: [id], onDelete: Cascade)
+  status       MeetingStatus     @default(REQUESTED)
+  cancelledById String?
+  cancelReason String?           @db.VarChar(200)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  proposals    MeetingProposal[]
+
+  @@index([memberAId, status])
+  @@index([memberBId, status])
+}
+
+model MeetingProposal {
+  id         String   @id @default(cuid())
+  meetingId  String
+  meeting    Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  proposerId String
+  proposer   Member   @relation(fields: [proposerId], references: [id], onDelete: Cascade)
+  startsAt   DateTime // MTG-01: future, at most 60 days ahead
+  placeName  String   @db.VarChar(80)
+  area       String   @db.VarChar(60)
+  note       String?  @db.VarChar(200)
+  createdAt  DateTime @default(now())
+
+  @@index([meetingId, createdAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  memberId  String
+  member    Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  type      String // e.g. "CONNECTION_REQUEST"; wording lives in templates (ADM-10)
+  data      Json
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([memberId, readAt])
+}
+
+// ───────────────────────── Operations ─────────────────────────
+
+enum ReportReason {
+  SUSPECTED_UNDER_18
+  HARASSMENT
+  FAKE_OR_IMPERSONATION
+  ASKED_FOR_MONEY
+  OFFERING_PAID_SERVICES
+  CONSENT_DISPUTE
+  WRONG_PHONE_NUMBER
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
+}
+
+enum Priority {
+  HIGH
+  MEDIUM
+  NORMAL
+}
+
+model Report {
+  id           String       @id @default(cuid())
+  reporterId   String
+  reporter     Member       @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedId   String
+  reported     Member       @relation("Reported", fields: [reportedId], references: [id], onDelete: Cascade)
+  reason       ReportReason
+  details      String?      @db.VarChar(1000)
+  priority     Priority // set from the reason (ADM-07)
+  status       ReportStatus @default(OPEN)
+  assigneeId   String?
+  assignee     Staff?       @relation("ReportAssignee", fields: [assigneeId], references: [id])
+  createdAt    DateTime     @default(now())
+  resolvedAt   DateTime?
+  actions      ModerationAction[]
+
+  @@index([status, priority, createdAt])
+}
+
+enum ModerationType {
+  WARN
+  HIDE_PROFILE
+  SUSPEND
+  REACTIVATE
+  DEACTIVATE
+  DELETE_SCHEDULED
+}
+
+model ModerationAction {
+  id        String         @id @default(cuid())
+  memberId  String
+  member    Member         @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  staffId   String
+  staff     Staff          @relation(fields: [staffId], references: [id])
+  reportId  String?
+  report    Report?        @relation(fields: [reportId], references: [id])
+  type      ModerationType
+  reason    String // required (ADM-08)
+  endsAt    DateTime? // suspension end
+  createdAt DateTime       @default(now())
+}
+
+enum DataRequestType {
+  EXPORT
+  DELETION
+}
+
+enum DataRequestStatus {
+  OPEN
+  COMPLETED
+  REJECTED
+}
+
+model DataRequest {
+  id            String            @id @default(cuid())
+  memberId      String
+  member        Member            @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  type          DataRequestType
+  status        DataRequestStatus @default(OPEN)
+  dueAt         DateTime // deletion: within 30 days (PRV-02)
+  completedById String?
+  completedBy   Staff?            @relation(fields: [completedById], references: [id])
+  createdAt     DateTime          @default(now())
+  completedAt   DateTime?
+}
+
+/// Editable limits (ADM-13). Defaults live in src/lib/settings.ts.
+model Setting {
+  key         String   @id
+  value       Json
+  changedById String?
+  changedBy   Staff?   @relation(fields: [changedById], references: [id])
+  updatedAt   DateTime @updatedAt
+}
+
+/// Insert-only (ADM-15). prisma/sql/audit_log_append_only.sql adds a trigger that
+/// rejects UPDATE and DELETE; it must be included in the first migration.
+model AuditLog {
+  id        BigInt   @id @default(autoincrement())
+  staffId   String?
+  staff     Staff?   @relation(fields: [staffId], references: [id], onDelete: Restrict) // staff are disabled, never deleted; SetNull would need an UPDATE the trigger forbids
+  action    String // e.g. "MEMBER_CREATED", "PRIVATE_FIELD_REVEALED"
+  targetType String
+  targetId  String
+  reason    String?
+  oldValue  Json?
+  newValue  Json?
+  createdAt DateTime @default(now())
+
+  @@index([staffId, createdAt])
+  @@index([targetType, targetId])
+}

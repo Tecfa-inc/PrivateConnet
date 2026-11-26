@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: privateconnet_migrate
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: privateconnet
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U privateconnet_migrate"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # CI-only values. Real keys live only on the server.
+      DATABASE_URL: postgresql://privateconnet_migrate:ci-only@localhost:5432/privateconnet
+      DATABASE_MIGRATE_URL: postgresql://privateconnet_migrate:ci-only@localhost:5432/privateconnet
+      APP_ORIGIN: http://localhost:3000
+      ADMIN_ORIGIN: http://localhost:3000
+      FIELD_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      BLIND_INDEX_KEY: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+      MEDIA_SIGNING_KEY: AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=
+      BETTER_AUTH_SECRET: ci-only-secret-not-used-anywhere-else-0000
+      MEDIA_ROOT: /tmp/media
+      SUPPORT_PHONE: "+231778104168"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Validate database schema
+        run: npx prisma validate
+      - name: Apply schema to a fresh database
+        run: npx prisma db push --accept-data-loss
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build

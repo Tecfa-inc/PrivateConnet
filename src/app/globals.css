@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/* PrivateConnet design tokens (design system, 26 Nov 2026). Use these names, never raw hex. */
+@theme {
+  --color-pink-500: #e679b0; /* fills only, with ink text */
+  --color-pink-700: #b8407f;
+  --color-pink-800: #9e2f69; /* pink text and links on white */
+  --color-pink-icon: #c94e8f;
+  --color-pink-100: #fceaf3;
+  --color-ink: #231f20;
+  --color-text-secondary: #5e575a;
+  --color-text-muted: #4a4346;
+  --color-surface-0: #ffffff;
+  --color-surface-100: #f6f1f3;
+  --color-line-100: #eae2e6;
+  --color-line-50: #f1ebee;
+  --color-control-border: #8e8589;
+  --color-focus-ring: #9e2f69;
+  --color-success-100: #e9f4ec;
+  --color-success-700: #1f6b3a;
+  --color-warning-100: #fef3e2;
+  --color-warning-800: #8a4b08;
+  --color-danger-100: #fde8e8;
+  --color-danger-800: #9b1c1c;
+
+  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Member-app type scale (NFR-17: body 17px, nothing under 15px). */
+  --text-display: 36px;
+  --text-display--line-height: 42px;
+  --text-title-1: 28px;
+  --text-title-1--line-height: 34px;
+  --text-title-2: 22px;
+  --text-title-2--line-height: 28px;
+  --text-title-3: 19px;
+  --text-title-3--line-height: 25px;
+  --text-body: 17px;
+  --text-body--line-height: 26px;
+  --text-small: 15px;
+  --text-small--line-height: 21px;
+  --text-overline: 13px;
+  --text-overline--line-height: 18px;
+  /* Admin (desktop staff) */
+  --text-admin-body: 14px;
+  --text-admin-body--line-height: 20px;
+  --text-admin-small: 12px;
+  --text-admin-small--line-height: 16px;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-sheet: 24px;
+
+  --spacing-touch: 48px; /* minimum touch target */
+  --spacing-field: 48px;
+  --spacing-button: 54px;
+  --spacing-nav: 80px;
+}
+
+html {
+  color: var(--color-ink);
+  background: var(--color-surface-0);
+  -webkit-text-size-adjust: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
