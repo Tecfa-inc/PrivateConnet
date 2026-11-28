@@ -6,6 +6,7 @@ const NAV = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/members/new", label: "Create member" },
   { href: "/admin/links", label: "Sign-in links" },
+  { href: "/admin/review", label: "Review queue" },
 ] as const;
 
 const ROLE_LABEL = { SUPER_ADMIN: "Super Admin", ADMIN: "Admin", MODERATOR: "Moderator" } as const;

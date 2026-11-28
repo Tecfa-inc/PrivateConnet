@@ -8,6 +8,7 @@ import { staffAuth } from "@/lib/auth/staff-auth";
 import { requireStaff } from "@/lib/auth/staff-guard";
 import { createMember, DuplicatePhoneError } from "@/features/admin/members/create-member";
 import { reissueLink, revokeLink } from "@/features/admin/links/links";
+import { AlreadyDecidedError, decidePhoto, decideRevision } from "@/features/admin/review/review";
 
 export type FormState = { error?: string; fieldErrors?: Record<string, string> } & Record<string, unknown>;
 
@@ -128,4 +129,22 @@ export async function reissueLinkAction(_prev: FormState, form: FormData): Promi
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not issue a link." };
   }
+}
+
+// ─── Review queue (ADM-05, PRO-03, PRO-06) ───
+
+export async function reviewDecisionAction(_prev: FormState, form: FormData): Promise<FormState> {
+  const staff = await requireStaff("review.decide");
+  const kind = form.get("kind");
+  const input = { id: form.get("id"), decision: form.get("decision"), reason: form.get("reason") || undefined };
+  try {
+    if (kind === "photo") await decidePhoto(staff, input);
+    else if (kind === "revision") await decideRevision(staff, input);
+    else return { error: "Unknown item." };
+  } catch (err) {
+    if (err instanceof z.ZodError) return { error: err.issues[0]?.message ?? "Check the reason." };
+    if (err instanceof AlreadyDecidedError) return { error: err.message };
+    throw err;
+  }
+  redirect("/admin/review");
 }

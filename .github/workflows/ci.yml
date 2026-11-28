@@ -3,7 +3,8 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # main, plus milestone branches (m1-…, m2-…, m3-…) so stacked milestone work is checked before a PR exists
+    branches: [main, "m[0-9]*"]
 
 permissions:
   contents: read
