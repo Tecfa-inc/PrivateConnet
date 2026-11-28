@@ -55,12 +55,10 @@ export async function processPhoto(input: Buffer): Promise<Record<PhotoSize, Buf
   if (input.length > DEFAULT_SETTINGS.maxPhotoUploadMb * 1024 * 1024) {
     throw new PhotoRejectedError("too-big");
   }
-  let meta: sharp.Metadata;
-  try {
-    meta = await sharp(input, { limitInputPixels: 40_000_000 }).metadata();
-  } catch {
-    throw new PhotoRejectedError("not-photo");
-  }
+  const meta = await sharp(input, { limitInputPixels: 40_000_000 })
+    .metadata()
+    .catch(() => null);
+  if (!meta) throw new PhotoRejectedError("not-photo");
   if (!meta.format || !ACCEPTED_FORMATS.has(meta.format)) {
     throw new PhotoRejectedError("wrong-format");
   }
